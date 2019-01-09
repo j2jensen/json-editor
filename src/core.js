@@ -63,15 +63,13 @@ JSONEditor.prototype = {
       // Starting data
       if(self.options.hasOwnProperty('startval')) self.root.setValue(self.options.startval);
 
-      self.validation_results = self.validator.validate(self.root.getValue());
-      self.root.showValidationErrors(self.validation_results);
+      self.validateCurrent();
       self.ready = true;
 
       // Fire ready event asynchronously
       window.requestAnimationFrame(function() {
         if(!self.ready) return;
-        self.validation_results = self.validator.validate(self.root.getValue());
-        self.root.showValidationErrors(self.validation_results);
+        self.validateCurrent();
         self.trigger('ready');
         self.trigger('change');
       });
@@ -98,6 +96,21 @@ JSONEditor.prototype = {
     // Current value (use cached result)
     else {
       return this.validation_results;
+    }
+  },
+  validateCurrent: function(){
+    var self = this;
+    var valueToValidate = self.root.getValue();
+    var stringified = JSON.stringify(valueToValidate);
+    if(self.last_validated !== stringified) {
+      self.validation_results = self.validator.validate(valueToValidate);
+      self.last_validated = stringified;
+    }
+    if(self.options.show_errors !== "never") {
+      self.root.showValidationErrors(self.validation_results);
+    }
+    else {
+      self.root.showValidationErrors([]);
     }
   },
   destroy: function() {
@@ -209,14 +222,7 @@ JSONEditor.prototype = {
       if(!self.ready) return;
 
       // Validate and cache results
-      self.validation_results = self.validator.validate(self.root.getValue());
-      
-      if(self.options.show_errors !== "never") {
-        self.root.showValidationErrors(self.validation_results);
-      }
-      else {
-        self.root.showValidationErrors([]);
-      }
+      self.validateCurrent();
       
       // Fire change event
       self.trigger('change');
