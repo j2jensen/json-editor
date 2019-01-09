@@ -241,9 +241,6 @@ JSONEditor.defaults.editors.array = JSONEditor.AbstractEditor.extend({
       parent: this,
       required: true
     });
-    ret.preBuild();
-    ret.build();
-    ret.postBuild();
 
     if(!ret.title_controls) {
       ret.array_controls = this.theme.getButtonHolder();
@@ -305,10 +302,20 @@ JSONEditor.defaults.editors.array = JSONEditor.AbstractEditor.extend({
       if(!row.tab) return;
 
       if(refresh_headers) {
-        row.tab_text.textContent = row.getHeaderText();
+        // TODO: Figure out header text without invoking the editor.
+        row.tab_text.textContent = self.getItemInfo(i).title; // row.getHeaderText();
       }
       else {
         if(row.tab === self.active_tab) {
+          if(row.deferred){
+            row.preBuild();
+            row.build();
+            row.postBuild();
+            if(row.deferred.value) {
+              row.setValue(row.deferred.value, row.deferred.initial);
+            }
+            delete row.deferred;
+          }
           self.theme.markTabActive(row);
         }
         else {
@@ -340,11 +347,11 @@ JSONEditor.defaults.editors.array = JSONEditor.AbstractEditor.extend({
     $each(value,function(i,val) {
       if(self.rows[i]) {
         // TODO: don't set the row's value if it hasn't changed
-        self.rows[i].setValue(val,initial);
+        self.setRowValue(i, val, initial);
       }
       else if(self.row_cache[i]) {
         self.rows[i] = self.row_cache[i];
-        self.rows[i].setValue(val,initial);
+        self.setRowValue(i, val, initial);
         self.rows[i].container.style.display = '';
         if(self.rows[i].tab) self.rows[i].tab.style.display = '';
         self.rows[i].register();
@@ -380,14 +387,25 @@ JSONEditor.defaults.editors.array = JSONEditor.AbstractEditor.extend({
 
     // TODO: sortable
   },
+  setRowValue: function(i, value, initial) {
+    if(this.rows[i].deferred) {
+      this.rows[i].deferred.value = value;
+      this.rows[i].deferred.initial = initial;
+    } else {
+      this.rows[i].setValue(value, initial);
+    }
+  },
+  refreshRowValue: function(i) {
+    this.value[i] = this.rows[i].deferred ? this.rows[i].deferred.value : this.rows[i].getValue();
+  },
   refreshValue: function(force) {
     var self = this;
     var oldi = this.value? this.value.length : 0;
     this.value = [];
 
-    $each(this.rows,function(i,editor) {
+    $each(this.rows, function(i) {
       // Get the value for this editor
-      self.value[i] = editor.getValue();
+      self.refreshRowValue(i);
     });
 
     if(oldi !== this.value.length || force) {
@@ -416,7 +434,7 @@ JSONEditor.defaults.editors.array = JSONEditor.AbstractEditor.extend({
         }
 
         // Get the value for this editor
-        self.value[i] = editor.getValue();
+        self.refreshRowValue(i);
       });
 
       var controls_needed = false;
@@ -481,7 +499,7 @@ JSONEditor.defaults.editors.array = JSONEditor.AbstractEditor.extend({
 
     if(self.tabs_holder) {
       self.rows[i].tab_text = document.createElement('span');
-      self.rows[i].tab_text.textContent = self.rows[i].getHeaderText();
+      self.rows[i].tab_text.textContent = self.getItemInfo(i).title;
       if(self.schema.format === 'tabs-top'){
         self.rows[i].tab = self.theme.getTopTab(self.rows[i].tab_text,this.getValidId(self.rows[i].path));
         self.theme.addTopTab(self.tabs_holder, self.rows[i].tab);
@@ -492,6 +510,7 @@ JSONEditor.defaults.editors.array = JSONEditor.AbstractEditor.extend({
       }
       self.rows[i].tab.addEventListener('click', function(e) {
         self.active_tab = self.rows[i].tab;
+        self.setRowValue(i, value);
         self.refreshTabs();
         e.preventDefault();
         e.stopPropagation();
@@ -627,7 +646,18 @@ JSONEditor.defaults.editors.array = JSONEditor.AbstractEditor.extend({
       }
     }
 
-    if(value) self.rows[i].setValue(value, initial);
+    if(self.tabs_holder) {
+      // If we're using tabs, keep track of the values to initialize for the active tab.
+      self.rows[i].deferred = {value: value, initial: initial};
+    } else {
+      // Otherwise, build out the editor immediately.
+      self.rows[i].preBuild();
+      self.rows[i].build();
+      self.rows[i].postBuild();
+      if(value){
+        self.rows[i].setValue(value, initial);
+      }
+    }
     self.refreshTabs();
   },
   addControls: function() {
