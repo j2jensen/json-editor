@@ -27,16 +27,20 @@ JSONEditor.Validator = Class.extend({
     return this._validateSchema(this.schema, value);
   },
   _validateSchema: function(schema,value,path) {
-    var self = this;
     var errors = [];
-    var valid, i, j;
-    var stringified = JSON.stringify(value);
 
     path = path || 'root';
 
     // Work on a copy of the schema
-    schema = $extend({},this.jsoneditor.expandRefs(schema));
+    schema = $extend({},schema);
 
+    return this._expandAndValidateSchema(schema, value, path, errors);
+  },
+  _expandAndValidateSchema: function(schema, value, path, errors)
+  {
+    var self = this;
+    schema = this.jsoneditor.expandRefs(schema);
+    var valid, i, j;
     /*
      * Type Agnostic Validation
      */
@@ -57,8 +61,12 @@ JSONEditor.Validator = Class.extend({
     // `enum`
     if(schema["enum"]) {
       valid = false;
+      var stringified = JSON.stringify(value);
       for(i=0; i<schema["enum"].length; i++) {
-        if(stringified === JSON.stringify(schema["enum"][i])) valid = true;
+        if(stringified === JSON.stringify(schema["enum"][i])) {
+          valid = true;
+          break;
+        } 
       }
       if(!valid) {
         errors.push({
@@ -72,14 +80,14 @@ JSONEditor.Validator = Class.extend({
     // `extends` (version 3)
     if(schema["extends"]) {
       for(i=0; i<schema["extends"].length; i++) {
-        errors = errors.concat(this._validateSchema(schema["extends"][i],value,path));
+        this._expandAndValidateSchema(schema["extends"][i], value, path, errors);
       }
     }
 
     // `allOf`
     if(schema.allOf) {
       for(i=0; i<schema.allOf.length; i++) {
-        errors = errors.concat(this._validateSchema(schema.allOf[i],value,path));
+        this._expandAndValidateSchema(schema.allOf[i], value, path, errors);
       }
     }
 
@@ -115,7 +123,7 @@ JSONEditor.Validator = Class.extend({
         for(j=0; j<tmp.length; j++) {
           tmp[j].path = path+'.oneOf['+i+']'+tmp[j].path.substr(path.length);
         }
-        oneof_errors = oneof_errors.concat(tmp);
+        Array.prototype.push.apply(oneof_errors, tmp);
 
       }
       if(valid !== 1) {
@@ -124,7 +132,7 @@ JSONEditor.Validator = Class.extend({
           property: 'oneOf',
           message: this.translate('error_oneOf', [valid])
         });
-        errors = errors.concat(oneof_errors);
+        Array.prototype.push.apply(errors, oneof_errors);
       }
     }
 
@@ -346,7 +354,7 @@ JSONEditor.Validator = Class.extend({
             // If this item has a specific schema tied to it
             // Validate against it
             if(schema.items[i]) {
-              errors = errors.concat(this._validateSchema(schema.items[i],value[i],path+'.'+i));
+              this._expandAndValidateSchema(schema.items[i],value[i],path+'.'+i,errors);
             }
             // If all additional items are allowed
             else if(schema.additionalItems === true) {
@@ -355,7 +363,7 @@ JSONEditor.Validator = Class.extend({
             // If additional items is a schema
             // TODO: Incompatibility between version 3 and 4 of the spec
             else if(schema.additionalItems) {
-              errors = errors.concat(this._validateSchema(schema.additionalItems,value[i],path+'.'+i));
+              this._expandAndValidateSchema(schema.additionalItems,value[i],path+'.'+i,errors);
             }
             // If no additional items are allowed
             else if(schema.additionalItems === false) {
@@ -376,7 +384,7 @@ JSONEditor.Validator = Class.extend({
         else {
           // Each item in the array must validate against the schema
           for(i=0; i<value.length; i++) {
-            errors = errors.concat(this._validateSchema(schema.items,value[i],path+'.'+i));
+            this._expandAndValidateSchema(schema.items,value[i],path+'.'+i,errors);
           }
         }
       }
@@ -472,7 +480,7 @@ JSONEditor.Validator = Class.extend({
       for(i in schema.properties) {
         if(!schema.properties.hasOwnProperty(i)) continue;
         validated_properties[i] = true;
-        errors = errors.concat(this._validateSchema(schema.properties[i],value[i],path+'.'+i));
+        this._expandAndValidateSchema(schema.properties[i],value[i],path+'.'+i,errors);
       }
 
       // `patternProperties`
@@ -486,7 +494,7 @@ JSONEditor.Validator = Class.extend({
             if(!value.hasOwnProperty(j)) continue;
             if(regex.test(j)) {
               validated_properties[j] = true;
-              errors = errors.concat(this._validateSchema(schema.patternProperties[i],value[j],path+'.'+j));
+              this._expandAndValidateSchema(schema.patternProperties[i],value[j],path+'.'+j,errors);
             }
           }
         }
@@ -518,7 +526,7 @@ JSONEditor.Validator = Class.extend({
             // Must match schema
             // TODO: incompatibility between version 3 and 4 of the spec
             else {
-              errors = errors.concat(this._validateSchema(schema.additionalProperties,value[i],path+'.'+i));
+              this._expandAndValidateSchema(schema.additionalProperties,value[i],path+'.'+i,errors);
             }
           }
         }
@@ -546,7 +554,7 @@ JSONEditor.Validator = Class.extend({
           }
           // Schema dependency
           else {
-            errors = errors.concat(this._validateSchema(schema.dependencies[i],value,path));
+            this._expandAndValidateSchema(schema.dependencies[i],value,path);
           }
         }
       }
@@ -566,7 +574,7 @@ JSONEditor.Validator = Class.extend({
 
           schema = $extend({}, schema, this.jsoneditor.refs[ref]);
 
-          errors = errors.concat(this._validateSchema(schema, value, path));
+          this._expandAndValidateSchema(schema, value, path, errors);
         }
       }
     }
@@ -651,16 +659,16 @@ JSONEditor.Validator = Class.extend({
     }
 
     // Internal validators using the custom validator format
-    errors = errors.concat(ipValidator.validate.call(self,schema,value,path));
+    Array.prototype.push.apply(errors, ipValidator.validate.call(self,schema,value,path));
 
     // Custom type validation (global)
     $each(JSONEditor.defaults.custom_validators,function(i,validator) {
-      errors = errors.concat(validator.call(self,schema,value,path));
+      Array.prototype.push.apply(errors, validator.call(self,schema,value,path));
     });
     // Custom type validation (instance specific)
     if(this.options.custom_validators) {
       $each(this.options.custom_validators,function(i,validator) {
-        errors = errors.concat(validator.call(self,schema,value,path));
+        Array.prototype.push.apply(errors, validator.call(self,schema,value,path));
       });
     }
 
